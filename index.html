@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>บริการประชาชน รพ.สต.คลองจระเข้</title>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+:root{--navy:#17415b;--blue:#4c9bb5;--teal:#55a99b;--mint:#dff2ec;--sky:#e5f2f8;
+--paper:#f5f9fb;--ink:#203746;--muted:#6c8490;--line:#d7e5eb;--danger:#b64e5a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:Arial,"Noto Sans Thai",sans-serif}
+header{background:linear-gradient(115deg,var(--navy),#397d91);color:#fff;padding:20px 16px}
+.head{max-width:620px;margin:auto}
+header h1{margin:0;font-size:19px}header p{margin:5px 0 0;color:#d9eef1;font-size:13px}
+main{max-width:620px;margin:18px auto;padding:0 14px}
+.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px;margin:14px 0;box-shadow:0 8px 24px #17415b12}
+label{display:block;font-weight:700;font-size:14px;color:#365667;margin-top:8px}
+input[type=text]{width:100%;padding:12px;border:1px solid #c8dbe3;border-radius:9px;margin:6px 0 12px;font:inherit;text-transform:uppercase;letter-spacing:2px}
+button{border:0;border-radius:9px;background:var(--teal);color:#fff;padding:11px 16px;font:inherit;font-weight:700;cursor:pointer;margin:4px 6px 4px 0}
+button.secondary{background:var(--sky);color:var(--navy);border:1px solid #c9e0e8}
+button.danger{background:#fbecee;color:var(--danger);border:1px solid #f0cfd3}
+button:disabled{opacity:.6;cursor:wait}
+.notice{background:#f1f8fa;border-left:4px solid var(--blue);padding:11px 13px;border-radius:8px;color:#476575;font-size:13px;line-height:1.6}
+.muted{color:var(--muted);font-size:13px;line-height:1.6}
+.msg{margin-top:10px;font-size:14px}.ok{color:#277863}.err{color:var(--danger)}
+.pill{display:inline-block;border-radius:30px;background:var(--mint);color:#286b60;padding:4px 10px;font-size:13px;font-weight:700}
+.hidden{display:none}
+.row{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid #e5edf0;font-size:14px}
+.row:last-child{border-bottom:0}.row span:first-child{color:var(--muted)}
+.consent{font-weight:400;display:flex;gap:8px;align-items:flex-start;line-height:1.5}
+</style>
+</head>
+<body>
+<header><div class="head">
+  <h1>บริการสำหรับประชาชน</h1>
+  <p>โรงพยาบาลส่งเสริมสุขภาพตำบลคลองจระเข้</p>
+</div></header>
+
+<main>
+  <div class="card">
+    <div id="status" class="muted">กำลังเชื่อมต่อ LINE…</div>
+
+    <div id="linkBox" class="hidden">
+      <div class="notice">รับรหัสผูกบัญชีจากเจ้าหน้าที่ รหัสใช้ได้ครั้งเดียวและหมดอายุใน 15 นาที</div>
+      <label for="code">รหัสจากเจ้าหน้าที่</label>
+      <input id="code" type="text" maxlength="10" autocomplete="one-time-code" placeholder="รหัส 10 ตัวอักษร">
+      <label class="consent">
+        <input id="consent" type="checkbox">
+        <span>ยินยอมให้เชื่อมบัญชี LINE เพื่อดูผลคัดกรองและรับคำแนะนำทาง LINE</span>
+      </label>
+      <button id="linkBtn" onclick="linkAccount()">ยืนยันและผูกบัญชี</button>
+    </div>
+
+    <div id="actions" class="hidden">
+      <button class="secondary" onclick="loadLatest()">ดูผลคัดกรองล่าสุด</button>
+      <button class="danger" onclick="unlinkAccount()">ยกเลิกการผูกบัญชี</button>
+    </div>
+
+    <div id="message" class="msg"></div>
+  </div>
+
+  <div id="result"></div>
+</main>
+
+<script>
+const LIFF_ID = "ใส่_LIFF_ID";
+const API_URL = "ใส่_WEB_APP_URL_ที่ลงท้าย_/exec";
+
+let idToken = "";
+
+function esc(v){
+  return String(v == null ? "" : v).replace(/[&<>"']/g, c => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function show(text, ok){
+  const el = document.getElementById("message");
+  el.textContent = text;
+  el.className = "msg " + (ok ? "ok" : "err");
+}
+
+async function api(action, payload){
+  const res = await fetch(API_URL, {
+    method: "POST",
+    redirect: "follow",
+    // ใช้ text/plain เพื่อไม่ให้เบราว์เซอร์ส่ง preflight ซึ่ง Apps Script ไม่รองรับ
+    headers: {"Content-Type": "text/plain;charset=utf-8"},
+    body: JSON.stringify(Object.assign({action: action, idToken: idToken}, payload || {}))
+  });
+  const json = await res.json();
+  if (!json.ok) throw new Error(json.error || "เกิดข้อผิดพลาด");
+  return json.data;
+}
+
+async function start(){
+  const status = document.getElementById("status");
+  try {
+    await liff.init({liffId: LIFF_ID});
+    if (!liff.isLoggedIn()) { liff.login(); return; }
+    idToken = liff.getIDToken();
+    if (!idToken) throw new Error("ไม่ได้รับ ID token กรุณาเปิดผ่าน LINE OA ใหม่");
+    status.textContent = "เชื่อมต่อ LINE แล้ว";
+    document.getElementById("linkBox").classList.remove("hidden");
+    document.getElementById("actions").classList.remove("hidden");
+  } catch (e) {
+    status.textContent = e.message || "เชื่อมต่อ LINE ไม่สำเร็จ";
+    status.className = "msg err";
+  }
+}
+
+async function linkAccount(){
+  const btn = document.getElementById("linkBtn");
+  btn.disabled = true;
+  try {
+    if (!document.getElementById("consent").checked) throw new Error("กรุณายืนยันความยินยอมก่อน");
+    const code = document.getElementById("code").value.trim().toUpperCase();
+    const r = await api("link", {code: code, consent: true});
+    show(r.message, true);
+    document.getElementById("code").value = "";
+  } catch (e) { show(e.message, false); }
+  btn.disabled = false;
+}
+
+async function loadLatest(){
+  try {
+    const r = await api("latest");
+    document.getElementById("result").innerHTML =
+      "<div class='card'><h3 style='margin-top:0;color:#17415b'>" + esc(r.name) +
+      " <span class='pill'>" + esc(r.color) + "</span></h3>" +
+      "<div class='row'><span>หมู่บ้าน</span><span>" + esc(r.village) + "</span></div>" +
+      "<div class='row'><span>วันที่คัดกรอง</span><span>" + esc(r.date) + "</span></div>" +
+      "<div class='row'><span>ความดันโลหิต</span><span>" + esc(r.sbp) + "/" + esc(r.dbp) + " mmHg — " + esc(r.bp) + "</span></div>" +
+      "<div class='row'><span>น้ำตาล</span><span>" + esc(r.glucose) + " mg/dL — " + esc(r.dm) + "</span></div>" +
+      "<div class='row'><span>ปิงปองจราจร 7 สี</span><span>" + esc(r.color) + "</span></div>" +
+      "<p><b>คำแนะนำ:</b> " + esc(r.advice || "โปรดติดต่อเจ้าหน้าที่เพื่อรับคำแนะนำ") + "</p>" +
+      "<p class='muted'>ผลคัดกรองเบื้องต้น ไม่ใช่การวินิจฉัยโรค หากมีอาการผิดปกติ โปรดติดต่อเจ้าหน้าที่สาธารณสุข</p></div>";
+    show("", true);
+  } catch (e) { show(e.message, false); }
+}
+
+async function unlinkAccount(){
+  if (!confirm("ยืนยันยกเลิกการผูกบัญชี LINE หรือไม่")) return;
+  try {
+    const r = await api("unlink");
+    document.getElementById("result").innerHTML = "";
+    show(r.message, true);
+  } catch (e) { show(e.message, false); }
+}
+
+start();
+</script>
+</body>
+</html>
